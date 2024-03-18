@@ -27,11 +27,11 @@
 %
 % last update: Time-stamp: <2020-10-20 17:46:58 (otoolej)>
 %-------------------------------------------------------------------------------
-function [hrv_feats_avg_tb, hrv_feats_epoch_tb] = hrv_features(rr_peaks_st, params)
-if(nargin < 1 || isempty(rr_peaks_st)), rr_peaks_st=[]; end
-if(nargin < 2 || isempty(params)), params = hrv_EAR; end
+function [hrv_feats_avg_tb, hrv_feats_epoch_tb] = hrv_features(rr_peaks_st, output_path, params)
+if(nargin < 2 || isempty(rr_peaks_st)), rr_peaks_st=[]; end
+if(nargin < 3 || isempty(params)), params = hrv_EAR; end
 
-DBverbose = 0;
+DBverbose = 1;
 
 
 
@@ -60,7 +60,7 @@ for n=1:length(rr_peaks_st)
     if(~isempty(params.L_hrv_epoch))
         time_epochs = buffer(rr_peaks_st(n).rr_peaks(1):rr_peaks_st(n).rr_peaks(end), ...
                              params.L_hrv_epoch, ...
-                             params.L_hrv_epoch * (params.L_overlap / 100), 'nodelay');
+                             params.L_hrv_epoch * (params.L_overlap / 100));
         time_epochs(time_epochs(:, end) == 0, end) = max(time_epochs(:, end));
         
         N_epochs = size(time_epochs, 2);
@@ -78,7 +78,7 @@ for n=1:length(rr_peaks_st)
     for p = 1:N_epochs
         % extract the epoch:
         [~, istart] = find_closest(rr_peaks_st(n).rr_peaks, time_epochs(1, p));
-        [~, iend] = find_closest(rr_peaks_st(n).rr_peaks, time_epochs(end, p));        
+        [~, iend] = find_closest(rr_peaks_st(n).rr_peaks, time_epochs(p, end));        
         
         if(DBverbose)
             fprintf('start time = %.2f; end time = %.2f\n', rr_peaks_st(n).rr_peaks(istart) / 60, ...
@@ -90,9 +90,8 @@ for n=1:length(rr_peaks_st)
         rr_int_epoch = rr_peaks_st(n).rr_interval(istart:(iend - 1));        
         
 
-        % epoch must be sufficient long and <50% NaNs:
-        if(((rr_peaks_epoch(end) - rr_peaks_epoch(1)) > (params.L_hrv_epoch / 2)) && ...
-           (length(find(isnan(rr_int_epoch))) / length(rr_int_epoch)) < 0.5)
+        % <50% NaNs:
+        if((length(find(isnan(rr_int_epoch))) / length(rr_int_epoch)) < 0.5)
             
             % convert RR interval to milliseconds:
             rr_int_epoch = rr_int_epoch .* 1000;
@@ -148,8 +147,8 @@ for n=1:length(rr_peaks_st)
 end
 
 
-writetable(hrv_feats_avg_tb, params.HRV_FEAT_CSV);
-writetable(hrv_feats_epoch_tb, params.HRV_FEAT_EPOCHS_CSV);
+writetable(hrv_feats_avg_tb, output_path);
+% writematrix(hrv_feats_epoch_tb, params.HRV_FEAT_EPOCHS_CSV);
 
 
 

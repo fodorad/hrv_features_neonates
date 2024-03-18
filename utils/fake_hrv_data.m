@@ -45,7 +45,6 @@ end
 
 
 if(db_plot)
-    set_figure(2);
     plot([rr_peaks_st(1).rr_peaks(1:end - 1)] ./ 60, rr_peaks_st(1).rr_interval, '-o');
     xlabel('time (minutes)');
     ylabel('RR interval (seconds)');

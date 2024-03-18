@@ -21,12 +21,13 @@ classdef hrv_EAR
         
         
         % limit max. RR interval (to remove artefacts)
-        %  to turn off: max_rr_interval = [];
-        max_rr_interval = 2;
+        % to turn off: max_rr_interval = [];
+        max_rr_interval = []; % 2;
         
         % if want to segment the HRV and estimate parameters on each segment:
         % (in seconds); set to /L_hrv_epoch = [];/ to use full length
-        L_hrv_epoch = 5 * 60;
+        %L_hrv_epoch = 5 * 60;
+        L_hrv_epoch = [];
         L_overlap = 50; % in percentage
 
         
