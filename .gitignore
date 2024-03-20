@@ -1,6 +1,7 @@
 data/*.csv
 data/*.mat
 input/*.csv
+visualization
 
 #### joe made this: http://goel.io/joe
 
