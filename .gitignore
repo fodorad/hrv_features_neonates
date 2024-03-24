@@ -2,6 +2,8 @@ data/*.csv
 data/*.mat
 input/*.csv
 visualization
+*.csv
+*.xlsx
 
 #### joe made this: http://goel.io/joe
 

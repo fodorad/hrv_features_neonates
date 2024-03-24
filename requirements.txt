@@ -2,4 +2,5 @@ scipy
 neurokit2
 tqdm
 pandas
+openpyxl
 matplotlib

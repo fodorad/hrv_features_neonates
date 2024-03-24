@@ -31,7 +31,7 @@ if(find(h~=0, 1)<X-1)
     for n=1:X-1
         n_fit(n) = TI_N(n, h(1:X));
     end
-    N = find(n_fit==nanmin(n_fit), 1);
+    N = find(n_fit==min(n_fit), 1);
 else
     N=X-1;
 end
@@ -41,7 +41,7 @@ if(X<find(h~=0, 1, 'last'))
     for n=1:(length(h)-X)
         m_fit(n)=TI_M(n+1, h(X:end));
     end
-    M=find(m_fit==nanmin(m_fit), 1, 'last')+X;
+    M=find(m_fit==min(m_fit), 1, 'last')+X;
 else
     M=X+1;
 end

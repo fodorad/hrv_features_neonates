@@ -164,37 +164,106 @@ class SegmentedPolarECG(PolarECG):
         return self
 
 
+def read_excel(file_path: str) -> pd.DataFrame:
+    df = pd.read_excel(file_path, dtype=str)
+    n_rows_before = len(df)
+    df.columns = [col.lower().replace(' ', '_') for col in df.columns] # normalize column names
+    df['participant_code'] = df['participant_code'].astype(int)
+    df = df.dropna() # drop rows with NaN values
+    n_rows_after = len(df)
+    print(f"Excel file is loaded: {file_path}")
+    print(f"Number of acceptable rows: {len(df)}")
+    print(f"Number of dropped rows: {n_rows_before - n_rows_after}")
+    return df
+
+
+def check_args_sample(args):
+    if args.id is None:
+        raise ValueError(f"Missing session ID. Given value: {args.id}")
+    if args.polar_csv_anya is None or not Path(args.polar_csv_anya).is_file():
+        raise ValueError(f"Missing path to the mother's polar csv file. Given value: {args.polar_csv_anya}")
+    if args.polar_csv_baba is None or not Path(args.polar_csv_anya).is_file():
+        raise ValueError(f"Missing path to the baby's input csv file. Given value: {args.polar_csv_baba}")
+    if args.baseline_start is None:
+        raise ValueError(f"Missing baseline start time. Given value: {args.baseline_start}")
+    if args.baseline_end is None:
+        raise ValueError(f"Missing baseline end time. Given value: {args.baseline_end}")
+    if args.sfp1_start is None:
+        raise ValueError(f"Missing Play 1 start time. Given value: {args.sfp1_start}")
+    if args.sfp1_end is None:
+        raise ValueError(f"Missing Play 1 end time. Given value: {args.sfp1_end}")
+    if args.sfp2_start is None:
+        raise ValueError(f"Missing Still Face start time. Given value: {args.sfp2_start}")
+    if args.sfp2_end is None:
+        raise ValueError(f"Missing Still Face end time. Given value: {args.sfp2_end}")
+    if args.sfp3_start is None:
+        raise ValueError(f"Missing Play 2 start time. Given value: {args.sfp3_start}")
+    if args.sfp3_end is None:
+        raise ValueError(f"Missing Play 2 end time. Given value: {args.sfp3_end}")
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Preprocessing script')
-    parser.add_argument('--id', type=int, required=True, help='Session ID')
-    parser.add_argument('--polar_csv_anya', type=str, required=True, help='Path to the mother\'s polar csv file')
-    parser.add_argument('--polar_csv_baba', type=str, required=True, help='Path to the baby\'s input csv file')
-    parser.add_argument('--baseline_start', type=str, required=True, help='Baseline start time in HH:MM:SS format')
-    parser.add_argument('--baseline_end', type=str, required=True, help='Baseline end time in HH:MM:SS format')
-    parser.add_argument('--sfp1_start', type=str, required=True, help='Play 1 start time in HH:MM:SS format')
-    parser.add_argument('--sfp1_end', type=str, required=True, help='Play 1 end time in HH:MM:SS format')
-    parser.add_argument('--sfp2_start', type=str, required=True, help='Still Face start time in HH:MM:SS format')
-    parser.add_argument('--sfp2_end', type=str, required=True, help='Still Face end time in HH:MM:SS format')
-    parser.add_argument('--sfp3_start', type=str, required=True, help='Play 2 start time in HH:MM:SS format')
-    parser.add_argument('--sfp3_end', type=str, required=True, help='Play 2 end time in HH:MM:SS format')
+    parser.add_argument('--xlsx', type=str, help='Path to the .xlsx file')
+    parser.add_argument('--id', type=int, help='Session ID')
+    parser.add_argument('--polar_csv_anya', type=str, help='Path to the mother\'s polar csv file')
+    parser.add_argument('--polar_csv_baba', type=str, help='Path to the baby\'s input csv file')
+    parser.add_argument('--baseline_start', type=str, help='Baseline start time in HH:MM:SS format')
+    parser.add_argument('--baseline_end', type=str, help='Baseline end time in HH:MM:SS format')
+    parser.add_argument('--sfp1_start', type=str, help='Play 1 start time in HH:MM:SS format')
+    parser.add_argument('--sfp1_end', type=str, help='Play 1 end time in HH:MM:SS format')
+    parser.add_argument('--sfp2_start', type=str, help='Still Face start time in HH:MM:SS format')
+    parser.add_argument('--sfp2_end', type=str, help='Still Face end time in HH:MM:SS format')
+    parser.add_argument('--sfp3_start', type=str, help='Play 2 start time in HH:MM:SS format')
+    parser.add_argument('--sfp3_end', type=str, help='Play 2 end time in HH:MM:SS format')
     parser.add_argument('--save_ecg_plots', action='store_true', help='Flag to save ECG plots')
     args = parser.parse_args()
 
-    hrv_anya = SegmentedPolarECG(args.id, "A", args.polar_csv_anya,
-                                 args.baseline_start, args.baseline_end,
-                                 args.sfp1_start, args.sfp1_end,
-                                 args.sfp2_start, args.sfp2_end,
-                                 args.sfp3_start, args.sfp3_end).save_structs()
 
-    if bool(args.save_ecg_plots):
-        hrv_anya.save_ecg_plots()
+    if args.xlsx is not None and Path(args.xlsx).is_file():
+        print("Running on multiple samples...")
+        df = read_excel(args.xlsx)
+        for index, row in df.iterrows():
+            print("=" * 50)
+            hrv_anya = SegmentedPolarECG(row['participant_code'], "A", row['polar_csv_anya'],
+                                         row['baseline_start'], row['baseline_end'],
+                                         row['sfp_1_start'], row['sfp_1_end'],
+                                         row['sfp_2_start'], row['sfp_2_end'],
+                                         row['sfp_3_start'], row['sfp_3_end']).save_structs()
 
-    hrv_baba = SegmentedPolarECG(args.id, "B", args.polar_csv_baba,
-                                 args.baseline_start, args.baseline_end,
-                                 args.sfp1_start, args.sfp1_end,
-                                 args.sfp2_start, args.sfp2_end,
-                                 args.sfp3_start, args.sfp3_end).save_structs()
+            if bool(args.save_ecg_plots):
+                hrv_anya.save_ecg_plots()
 
-    if bool(args.save_ecg_plots):
-        hrv_baba.save_ecg_plots()
+            hrv_baba = SegmentedPolarECG(row['participant_code'], "B", row['polar_csv_baba'],
+                                         row['baseline_start'], row['baseline_end'],
+                                         row['sfp_1_start'], row['sfp_1_end'],
+                                         row['sfp_2_start'], row['sfp_2_end'],
+                                         row['sfp_3_start'], row['sfp_3_end']).save_structs()
+
+            if bool(args.save_ecg_plots):
+                hrv_baba.save_ecg_plots()
+
+    else:
+        print("Running on a single sample...")
+        check_args_sample(args)
+
+        hrv_anya = SegmentedPolarECG(args.id, "A", args.polar_csv_anya,
+                                     args.baseline_start, args.baseline_end,
+                                     args.sfp1_start, args.sfp1_end,
+                                     args.sfp2_start, args.sfp2_end,
+                                     args.sfp3_start, args.sfp3_end).save_structs()
+
+        if bool(args.save_ecg_plots):
+            hrv_anya.save_ecg_plots()
+
+        hrv_baba = SegmentedPolarECG(args.id, "B", args.polar_csv_baba,
+                                     args.baseline_start, args.baseline_end,
+                                     args.sfp1_start, args.sfp1_end,
+                                     args.sfp2_start, args.sfp2_end,
+                                     args.sfp3_start, args.sfp3_end).save_structs()
+
+        if bool(args.save_ecg_plots):
+            hrv_baba.save_ecg_plots()
+        
+    print("=" * 50, '\nDone!')

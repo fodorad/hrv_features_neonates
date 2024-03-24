@@ -99,8 +99,8 @@ for n=1:length(rr_peaks_st)
             %---------------------------------------------------------------------
             % 1. mean, SD features
             %---------------------------------------------------------------------
-            hrv_feats.mean_NN(p) = nanmean(rr_int_epoch);
-            hrv_feats.SD_NN(p) = nanstd(rr_int_epoch);        
+            hrv_feats.mean_NN(p) = mean(rr_int_epoch);
+            hrv_feats.SD_NN(p) = std(rr_int_epoch);        
             
             %---------------------------------------------------------------------
             % 2. interpolate series to uniform time sampling for spectral analysis
@@ -136,7 +136,7 @@ for n=1:length(rr_peaks_st)
         end
     end
     
-    hrv_feats_avg_tb{n, (istart_feat_tb + 1):end} = nanmedian(hrv_feats{:, 1:end}, 1); 
+    hrv_feats_avg_tb{n, (istart_feat_tb + 1):end} = median(hrv_feats{:, 1:end}, 1); 
     
     if(nargout > 1)
         hrv_feats.baby_ID(:) = string(hrv_feats_avg_tb.code(n));
