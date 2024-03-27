@@ -80,23 +80,30 @@ class SegmentedPolarECG(PolarECG):
         segment_ids[(full_timestamp >= self.segment_timestamps['sfp1'][0]) & (full_timestamp <= self.segment_timestamps['sfp1'][1])] = ExperimentSegment.SFP1.value
         segment_ids[(full_timestamp >= self.segment_timestamps['sfp2'][0]) & (full_timestamp <= self.segment_timestamps['sfp2'][1])] = ExperimentSegment.SFP2.value
         segment_ids[(full_timestamp >= self.segment_timestamps['sfp3'][0]) & (full_timestamp <= self.segment_timestamps['sfp3'][1])] = ExperimentSegment.SFP3.value
-        self._check_segment_occurrence(segment_ids)
 
         self.ecg_data = np.column_stack((full_timestamp, self.ecg_data, segment_ids))
         self.r_peaks = self.r_peak_detection(self.sampling_frequency)
 
-    def _check_segment_timestamps(self) -> None:
+    def _check_segment_timestamps(self, raise_exception: bool = False) -> None:
         session_start = self.session_timestamps[0]
         session_end = self.session_timestamps[1]
 
+        self.msg = ""
+        self.skip_segments = [ExperimentSegment.OUTSIDE.value]
         for segment, timestamps in self.segment_timestamps.items():
             start = timestamps[0]
             end = timestamps[1]
 
             if start < session_start or end > session_end:
-                raise ValueError(f"Segment '{segment}' timestamps are not within the session interval." +
-                                 f"Session start: {session_start} - Session end: {session_end}, " +
-                                 f"Segment start: {start} - Segment end: {end}")
+                self.msg += f"[Error] Session {self.session_id}. Participant: {self.participant_id}. " + \
+                      f"\n\tSegment '{segment}' timestamps are not within the session interval. " + \
+                      f"\n\tSession start: {session_start} - Session end: {session_end}, " + \
+                      f"\n\tSegment start: {start} - Segment end: {end}\n"
+
+                if raise_exception:
+                    raise ValueError(self.msg)
+
+                self.skip_segments.append(ExperimentSegment[segment.upper()].value)
 
     def _parse_segment_timestamp(self, timestamp: str) -> datetime:
         return datetime.strptime(self.session_timestamps[0].strftime('%Y-%m-%d') + ' ' + timestamp, '%Y-%m-%d %H:%M:%S')
@@ -112,7 +119,7 @@ class SegmentedPolarECG(PolarECG):
 
         for segment_id in segment_names.keys():
             if sum(segment_ids == segment_id) == 0:
-                raise ValueError(f"Error: {segment_names[segment_id]} segment not found." + 
+                raise ValueError(f"Error in session {self.session_id}. {segment_names[segment_id]} segment not found." + 
                                  "Probably there is no overlap between the session and segment timestamps.")
 
     def save_ecg_plots(self, n_points: int = 2000, output_dir: str = 'visualization') -> None:
@@ -146,7 +153,7 @@ class SegmentedPolarECG(PolarECG):
 
         for segment in ExperimentSegment:
 
-            if segment == ExperimentSegment.OUTSIDE:
+            if segment.value in self.skip_segments:
                 continue
 
             code = f'{self.session_id}_{segment.name}_{self.participant_id}'
@@ -172,7 +179,7 @@ def read_excel(file_path: str) -> pd.DataFrame:
     df = df.dropna() # drop rows with NaN values
     n_rows_after = len(df)
     print(f"Excel file is loaded: {file_path}")
-    print(f"Number of acceptable rows: {len(df)}")
+    print(f"Number of rows without missing timestamps: {len(df)}")
     print(f"Number of dropped rows: {n_rows_before - n_rows_after}")
     return df
 
@@ -185,21 +192,21 @@ def check_args_sample(args):
     if args.polar_csv_baba is None or not Path(args.polar_csv_anya).is_file():
         raise ValueError(f"Missing path to the baby's input csv file. Given value: {args.polar_csv_baba}")
     if args.baseline_start is None:
-        raise ValueError(f"Missing baseline start time. Given value: {args.baseline_start}")
+        raise ValueError(f"Session id: {args.id}; Missing baseline start time. Given value: {args.baseline_start}")
     if args.baseline_end is None:
-        raise ValueError(f"Missing baseline end time. Given value: {args.baseline_end}")
+        raise ValueError(f"Session id: {args.id}; Missing baseline end time. Given value: {args.baseline_end}")
     if args.sfp1_start is None:
-        raise ValueError(f"Missing Play 1 start time. Given value: {args.sfp1_start}")
+        raise ValueError(f"Session id: {args.id}; Missing Play 1 start time. Given value: {args.sfp1_start}")
     if args.sfp1_end is None:
-        raise ValueError(f"Missing Play 1 end time. Given value: {args.sfp1_end}")
+        raise ValueError(f"Session id: {args.id}; Missing Play 1 end time. Given value: {args.sfp1_end}")
     if args.sfp2_start is None:
-        raise ValueError(f"Missing Still Face start time. Given value: {args.sfp2_start}")
+        raise ValueError(f"Session id: {args.id}; Missing Still Face start time. Given value: {args.sfp2_start}")
     if args.sfp2_end is None:
-        raise ValueError(f"Missing Still Face end time. Given value: {args.sfp2_end}")
+        raise ValueError(f"Session id: {args.id}; Missing Still Face end time. Given value: {args.sfp2_end}")
     if args.sfp3_start is None:
-        raise ValueError(f"Missing Play 2 start time. Given value: {args.sfp3_start}")
+        raise ValueError(f"Session id: {args.id}; Missing Play 2 start time. Given value: {args.sfp3_start}")
     if args.sfp3_end is None:
-        raise ValueError(f"Missing Play 2 end time. Given value: {args.sfp3_end}")
+        raise ValueError(f"Session id: {args.id}; Missing Play 2 end time. Given value: {args.sfp3_end}")
 
 
 if __name__ == '__main__':
@@ -224,25 +231,35 @@ if __name__ == '__main__':
     if args.xlsx is not None and Path(args.xlsx).is_file():
         print("Running on multiple samples...")
         df = read_excel(args.xlsx)
-        for index, row in df.iterrows():
-            print("=" * 50)
-            hrv_anya = SegmentedPolarECG(row['participant_code'], "A", row['polar_csv_anya'],
-                                         row['baseline_start'], row['baseline_end'],
-                                         row['sfp_1_start'], row['sfp_1_end'],
-                                         row['sfp_2_start'], row['sfp_2_end'],
-                                         row['sfp_3_start'], row['sfp_3_end']).save_structs()
+        
+        with open('skipped_segments.txt', 'w') as f:
 
-            if bool(args.save_ecg_plots):
-                hrv_anya.save_ecg_plots()
+            for index, row in df.iterrows():
+                print("=" * 50)
+                hrv_anya = SegmentedPolarECG(row['participant_code'], "A", row['polar_csv_anya'],
+                                            row['baseline_start'], row['baseline_end'],
+                                            row['sfp_1_start'], row['sfp_1_end'],
+                                            row['sfp_2_start'], row['sfp_2_end'],
+                                            row['sfp_3_start'], row['sfp_3_end']).save_structs()
 
-            hrv_baba = SegmentedPolarECG(row['participant_code'], "B", row['polar_csv_baba'],
-                                         row['baseline_start'], row['baseline_end'],
-                                         row['sfp_1_start'], row['sfp_1_end'],
-                                         row['sfp_2_start'], row['sfp_2_end'],
-                                         row['sfp_3_start'], row['sfp_3_end']).save_structs()
+                if bool(args.save_ecg_plots):
+                    hrv_anya.save_ecg_plots()
 
-            if bool(args.save_ecg_plots):
-                hrv_baba.save_ecg_plots()
+                hrv_baba = SegmentedPolarECG(row['participant_code'], "B", row['polar_csv_baba'],
+                                            row['baseline_start'], row['baseline_end'],
+                                            row['sfp_1_start'], row['sfp_1_end'],
+                                            row['sfp_2_start'], row['sfp_2_end'],
+                                            row['sfp_3_start'], row['sfp_3_end']).save_structs()
+
+                if bool(args.save_ecg_plots):
+                    hrv_baba.save_ecg_plots()
+
+                for line in hrv_anya.msg.split('\n'):
+                    if line != "":
+                        f.write(line + '\n')
+                for line in hrv_baba.msg.split('\n'):
+                    if line != "":
+                        f.write(line + '\n')
 
     else:
         print("Running on a single sample...")

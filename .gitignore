@@ -4,6 +4,7 @@ input/*.csv
 visualization
 *.csv
 *.xlsx
+*.txt
 
 #### joe made this: http://goel.io/joe
 
