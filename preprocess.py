@@ -158,6 +158,11 @@ class SegmentedPolarECG(PolarECG):
 
             code = f'{self.session_id}_{segment.name}_{self.participant_id}'
             rr_peaks = self.r_peaks[self.r_peaks[:, 3] == segment.value, 1]
+            
+            r_peaks_ts = self.r_peaks[self.r_peaks[:, 3] == segment.value, :]
+            np.savetxt(str(Path(output_dir) / f'{code}_ts.csv'), r_peaks_ts, delimiter=",", header="r_peak_timestamp,r_peak_delta_sec,r_peak_value,segment", comments='')
+            df = pd.DataFrame(r_peaks_ts, columns=["r_peak_timestamp","r_peak_delta_sec","r_peak_value","segment"])
+            df.to_excel(str(Path(output_dir) / f'{code}_ts.xlsx'), index=False)
 
             struct = {
                 'code': code,
