@@ -27,6 +27,14 @@ class ExperimentSegment(Enum):
     SFP3 = 3
 
 
+def calculate_rmssd(rr_interval: np.ndarray) -> float:
+    return np.sqrt(np.mean(np.diff(rr_interval) ** 2))
+
+def r_peak_detection(signal_clean, sampling_rate: int = 130) -> np.ndarray:
+    _, results = neurokit2.ecg_peaks(signal_clean, sampling_rate=sampling_rate)
+    return results["ECG_R_Peaks"] # r-peak indices
+
+
 class PolarECG:
 
     def __init__(self, session_id: int, participant_id: str, csv_file: str):
@@ -34,19 +42,22 @@ class PolarECG:
         self.participant_id = participant_id
         self.csv_file = csv_file
         self.csv_data = pd.read_csv(self.csv_file) # pandas dataframe
-        self.ecg_data = self.csv_data.iloc[:, :2].dropna().to_numpy() # (N, 2)
+        data = self.csv_data.iloc[:, :2].dropna().to_numpy().astype(float) # (N, 2)
+        self.ecg_timestamp_delta = data[:, 0] # (N,)
+        self.ecg_signal_raw = data[:, 1] # (N,)
         self.sampling_frequency = self._determine_sampling_frequency()
+        self.ecg_signal_clean = neurokit2.ecg_clean(self.ecg_signal_raw, sampling_rate=self.sampling_frequency, method='neurokit') # (N,)
         session_start = datetime.strptime(self.csv_data.columns.tolist()[0].split('_')[0], '%Y-%m-%dT%H:%M:%S.%fZ') + timedelta(hours=1) # timezone correction
-        self.session_timestamps = (session_start, session_start + timedelta(seconds=self.ecg_data[-1, 0]))
+        self.session_timestamps = (session_start, session_start + timedelta(seconds=self.ecg_timestamp_delta[-1]))
         print(f"CSV file is loaded: {csv_file}")
         print(f"Participant ID: {self.participant_id}")
         print(f"Session start: {self.session_timestamps[0].strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Session end: {self.session_timestamps[1].strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Number of data points: {len(self.ecg_data)}")
+        print(f"ECG length: {len(self.ecg_signal_clean)}")
         print(f"Mean sampling frequency: {self.sampling_frequency} Hz")
 
     def _determine_sampling_frequency(self) -> int:
-        delta_time = np.diff(self.ecg_data[:, 0])
+        delta_time = np.diff(self.ecg_timestamp_delta)
         average_delta_time = np.mean(delta_time)
         sampling_frequency = 1 / average_delta_time
         return np.rint(sampling_frequency).astype(int)
@@ -74,15 +85,21 @@ class SegmentedPolarECG(PolarECG):
         self.segment_timestamps['sfp3'] = (self._parse_segment_timestamp(sfp3_start), self._parse_segment_timestamp(sfp3_end))
         self._check_segment_timestamps()
 
-        full_timestamp = np.array([self.session_timestamps[0] + timedelta(seconds=data_point) for data_point in self.ecg_data[:, 0]])
-        segment_ids = np.zeros_like(self.ecg_data[:, 0]) - 1
-        segment_ids[(full_timestamp >= self.segment_timestamps['baseline'][0]) & (full_timestamp <= self.segment_timestamps['baseline'][1])] = ExperimentSegment.BASELINE.value
-        segment_ids[(full_timestamp >= self.segment_timestamps['sfp1'][0]) & (full_timestamp <= self.segment_timestamps['sfp1'][1])] = ExperimentSegment.SFP1.value
-        segment_ids[(full_timestamp >= self.segment_timestamps['sfp2'][0]) & (full_timestamp <= self.segment_timestamps['sfp2'][1])] = ExperimentSegment.SFP2.value
-        segment_ids[(full_timestamp >= self.segment_timestamps['sfp3'][0]) & (full_timestamp <= self.segment_timestamps['sfp3'][1])] = ExperimentSegment.SFP3.value
+        self.ecg_timestamp_full = np.array([self.session_timestamps[0] + timedelta(seconds=delta_sec) for delta_sec in self.ecg_timestamp_delta]) # (N,)
+        segment_ids = np.zeros_like(self.ecg_signal_clean) - 1
+        segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['baseline'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['baseline'][1])] = ExperimentSegment.BASELINE.value
+        segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['sfp1'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['sfp1'][1])] = ExperimentSegment.SFP1.value
+        segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['sfp2'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['sfp2'][1])] = ExperimentSegment.SFP2.value
+        segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['sfp3'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['sfp3'][1])] = ExperimentSegment.SFP3.value
+        self.ecg_segment_ids = segment_ids # (N,)
 
-        self.ecg_data = np.column_stack((full_timestamp, self.ecg_data, segment_ids))
-        self.r_peaks = self.r_peak_detection(self.sampling_frequency)
+        r_peaks_indices = r_peak_detection(self.ecg_signal_clean, self.sampling_frequency)
+        self.r_peaks = {
+            "signal": self.ecg_signal_clean[r_peaks_indices],
+            "timestamp_full": self.ecg_timestamp_full[r_peaks_indices],
+            "timestamp_delta": self.ecg_timestamp_delta[r_peaks_indices],
+            "segment_ids": self.ecg_segment_ids[r_peaks_indices]
+        }
 
     def _check_segment_timestamps(self, raise_exception: bool = False) -> None:
         session_start = self.session_timestamps[0]
@@ -108,12 +125,6 @@ class SegmentedPolarECG(PolarECG):
     def _parse_segment_timestamp(self, timestamp: str) -> datetime:
         return datetime.strptime(self.session_timestamps[0].strftime('%Y-%m-%d') + ' ' + timestamp, '%Y-%m-%d %H:%M:%S')
 
-    def r_peak_detection(self, sampling_rate: int = 130) -> np.ndarray:
-        signal = self.ecg_data[:, 2]
-        _, results = neurokit2.ecg_peaks(signal, sampling_rate=sampling_rate)
-        r_peaks = self.ecg_data[results["ECG_R_Peaks"], :]
-        return r_peaks
-
     def _check_segment_occurrence(self, segment_ids) -> None:
         segment_names = {segment.value: segment.name for segment in ExperimentSegment}
 
@@ -123,27 +134,40 @@ class SegmentedPolarECG(PolarECG):
                                  "Probably there is no overlap between the session and segment timestamps.")
 
     def save_ecg_plots(self, n_points: int = 2000, output_dir: str = 'visualization') -> None:
-        ecg_mean = np.nanmean(self.ecg_data[self.ecg_data[:, 3] != ExperimentSegment.OUTSIDE.value, 2])
-        ecg_std = np.nanstd(self.ecg_data[self.ecg_data[:, 3] != ExperimentSegment.OUTSIDE.value, 2])
+        ecg_mean = np.nanmean(self.ecg_signal_clean[self.ecg_segment_ids != ExperimentSegment.OUTSIDE.value])
+        ecg_std = np.nanstd(self.ecg_signal_clean[self.ecg_segment_ids != ExperimentSegment.OUTSIDE.value])
 
-        for ind in tqdm(range(0, len(self.ecg_data), n_points), total=len(self.ecg_data) // n_points + 1, desc=f'Saving ECG plots for {str(self.session_id) + " " + self.participant_id}'):
-            part_ecg_data = self.ecg_data[ind:ind + n_points, :]
-            part_r_peaks = self.r_peaks[(self.r_peaks[:, 1] >= part_ecg_data[0, 1]) & (self.r_peaks[:, 1] <= part_ecg_data[-1, 1])]
-            SegmentedPolarECG.plot_ecg_with_peaks_and_segments(part_ecg_data, part_r_peaks, ecg_mean, ecg_std, 
+        for ind in tqdm(range(0, len(self.ecg_signal_clean), n_points), total=len(self.ecg_signal_clean) // n_points + 1, desc=f'Saving ECG plots for {str(self.session_id) + " " + self.participant_id}'):
+            part_ecg_signal_clean = self.ecg_signal_clean[ind:ind + n_points]
+            part_ecg_timestamp_full = self.ecg_timestamp_full[ind:ind + n_points]
+            part_ecg_timestamp_delta = self.ecg_timestamp_delta[ind:ind + n_points]
+            part_ecg_segment_ids = self.ecg_segment_ids[ind:ind + n_points]
+            part_r_peaks = [(delta, signal) for delta, signal in zip(self.r_peaks['timestamp_delta'], self.r_peaks['signal']) if (delta >= part_ecg_timestamp_delta[0]) & (delta <= part_ecg_timestamp_delta[-1])]
+            SegmentedPolarECG.plot_ecg_with_peaks_and_segments(part_ecg_signal_clean, part_ecg_timestamp_delta, part_ecg_segment_ids,
+                                                               part_r_peaks,
+                                                               ecg_mean, ecg_std, 
                                                                output_path=str(Path(output_dir) / f'{str(self.session_id)}_{self.participant_id}' / f'{ind}-{ind + n_points}.png'))
 
     @classmethod
-    def plot_ecg_with_peaks_and_segments(cls, ecg_data: np.ndarray, r_peaks: np.ndarray, ecg_mean: float, ecg_std: float, output_path: str):
+    def plot_ecg_with_peaks_and_segments(cls, ecg_signal: np.ndarray,
+                                         ecg_timestamp_delta: np.ndarray,
+                                         ecg_segment_ids: np.ndarray,
+                                         r_peaks: tuple[np.ndarray, np.ndarray], # [timestamp_delta, signal]
+                                         ecg_mean: float,
+                                         ecg_std: float,
+                                         output_path: str):
+        r_peaks_timestamp_delta = [elem for elem, _ in r_peaks]
+        r_peaks_signal = [elem for _, elem in r_peaks]
         plt.figure(figsize=(15, 5))
         for i in range(-1, 4, 1):
-            mask = ecg_data[:, 3] == i
-            plt.plot(ecg_data[mask, 1], ecg_data[mask, 2], c=COLORS[i])
-        plt.scatter(r_peaks[:, 1], r_peaks[:, 2], s=10, color='red')
+            mask = ecg_segment_ids == i
+            plt.plot(ecg_timestamp_delta[mask], ecg_signal[mask], c=COLORS[i])
+        plt.scatter(r_peaks_timestamp_delta, r_peaks_signal, s=10, color='red')
         plt.xlabel('Time')
         plt.ylabel('Voltage')
-        plt.xlim(ecg_data[0, 1], ecg_data[-1, 1])
+        plt.xlim(ecg_timestamp_delta[0], ecg_timestamp_delta[-1])
         plt.ylim(ecg_mean - 10 * ecg_std, ecg_mean + 10 * ecg_std)
-        plt.title('Raw ECG Data')
+        plt.title('ECG signal with R-peaks and segments')
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(output_path)
         plt.close()
@@ -157,14 +181,18 @@ class SegmentedPolarECG(PolarECG):
                 continue
 
             code = f'{self.session_id}_{segment.name}_{self.participant_id}'
-            rr_peaks = self.r_peaks[self.r_peaks[:, 3] == segment.value, 1]
+            rr_peaks = self.r_peaks['timestamp_delta'][self.r_peaks['segment_ids'] == segment.value]
+            rr_interval = np.diff(rr_peaks)
+            rmssd = calculate_rmssd(rr_interval)
 
             struct = {
                 'code': code,
-                'rr_interval': np.diff(rr_peaks),
+                'rr_interval': rr_interval,
                 'rr_peaks': rr_peaks,
             }
 
+            rmssd_df = pd.DataFrame({'RMSSD': [rmssd]})
+            rmssd_df.to_csv(str(Path(output_dir) / f'{code}_features.csv'), index=False)
             scipy.io.savemat(str(Path(output_dir) / f'{code}.mat'), struct)
             print('Struct is saved:', str(Path(output_dir) / f'{code}.mat'))
 
@@ -224,7 +252,7 @@ if __name__ == '__main__':
     parser.add_argument('--sfp2_end', type=str, help='Still Face end time in HH:MM:SS format')
     parser.add_argument('--sfp3_start', type=str, help='Play 2 start time in HH:MM:SS format')
     parser.add_argument('--sfp3_end', type=str, help='Play 2 end time in HH:MM:SS format')
-    parser.add_argument('--save_ecg_plots', action='store_true', help='Flag to save ECG plots')
+    parser.add_argument('--save_ecg_plots', action='store_false', help='Flag to save ECG plots')
     args = parser.parse_args()
 
 
