@@ -191,6 +191,14 @@ class SegmentedPolarECG(PolarECG):
                 'rr_peaks': rr_peaks,
             }
 
+            r_peaks_df = pd.DataFrame({
+                'timestamp_full': self.r_peaks['timestamp_full'][self.r_peaks['segment_ids'] == segment.value],
+                'timestamp_delta': self.r_peaks['timestamp_delta'][self.r_peaks['segment_ids'] == segment.value],
+                'signal': self.r_peaks['signal'][self.r_peaks['segment_ids'] == segment.value],
+                'segment_ids': segment.value
+            })
+            r_peaks_df.to_csv(str(Path(output_dir) / f'{code}_r-peaks.csv'), index=False)
+
             rmssd_df = pd.DataFrame({'RMSSD': [rmssd]})
             rmssd_df.to_csv(str(Path(output_dir) / f'{code}_features.csv'), index=False)
             scipy.io.savemat(str(Path(output_dir) / f'{code}.mat'), struct)
@@ -252,7 +260,7 @@ if __name__ == '__main__':
     parser.add_argument('--sfp2_end', type=str, help='Still Face end time in HH:MM:SS format')
     parser.add_argument('--sfp3_start', type=str, help='Play 2 start time in HH:MM:SS format')
     parser.add_argument('--sfp3_end', type=str, help='Play 2 end time in HH:MM:SS format')
-    parser.add_argument('--save_ecg_plots', action='store_false', help='Flag to save ECG plots')
+    parser.add_argument('--save_ecg_plots', action='store_true', help='Flag to save ECG plots')
     args = parser.parse_args()
 
 
