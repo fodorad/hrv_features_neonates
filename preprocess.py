@@ -30,10 +30,6 @@ class ExperimentSegment(Enum):
 def calculate_rmssd(rr_interval: np.ndarray) -> float:
     return np.sqrt(np.mean(np.diff(rr_interval) ** 2))
 
-def r_peak_detection(signal_clean, sampling_rate: int = 130) -> np.ndarray:
-    _, results = neurokit2.ecg_peaks(signal_clean, sampling_rate=sampling_rate)
-    return results["ECG_R_Peaks"] # r-peak indices
-
 
 class PolarECG:
 
@@ -93,7 +89,10 @@ class SegmentedPolarECG(PolarECG):
         segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['sfp3'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['sfp3'][1])] = ExperimentSegment.SFP3.value
         self.ecg_segment_ids = segment_ids # (N,)
 
-        r_peaks_indices = r_peak_detection(self.ecg_signal_clean, self.sampling_frequency)
+        nk_r_peaks, info = neurokit2.ecg_peaks(self.ecg_signal_clean, sampling_rate=self.sampling_frequency)
+        self.time_domain_metrics = neurokit2.hrv_time(nk_r_peaks, sampling_rate=self.sampling_frequency)
+
+        r_peaks_indices = info["ECG_R_Peaks"]
         self.r_peaks = {
             "signal": self.ecg_signal_clean[r_peaks_indices],
             "timestamp_full": self.ecg_timestamp_full[r_peaks_indices],
@@ -199,8 +198,7 @@ class SegmentedPolarECG(PolarECG):
             })
             r_peaks_df.to_csv(str(Path(output_dir) / f'{code}_r-peaks.csv'), index=False)
 
-            rmssd_df = pd.DataFrame({'RMSSD': [rmssd]})
-            rmssd_df.to_csv(str(Path(output_dir) / f'{code}_features.csv'), index=False)
+            self.time_domain_metrics.to_csv(str(Path(output_dir) / f'{code}_features.csv'), index=False)
             scipy.io.savemat(str(Path(output_dir) / f'{code}.mat'), struct)
             print('Struct is saved:', str(Path(output_dir) / f'{code}.mat'))
 
