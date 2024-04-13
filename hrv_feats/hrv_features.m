@@ -31,7 +31,7 @@ function [hrv_feats_avg_tb, hrv_feats_epoch_tb] = hrv_features(rr_peaks_st, outp
 if(nargin < 2 || isempty(rr_peaks_st)), rr_peaks_st=[]; end
 if(nargin < 3 || isempty(params)), params = hrv_EAR; end
 
-DBverbose = 1;
+DBverbose = 0;
 
 
 

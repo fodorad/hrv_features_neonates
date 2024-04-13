@@ -1,6 +1,6 @@
-data/*.csv
-data/*.mat
-input/*.csv
+data/processed
+data/summary
+input/test
 visualization
 *.csv
 *.xlsx

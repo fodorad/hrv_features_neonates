@@ -88,6 +88,7 @@ class SegmentedPolarECG(PolarECG):
         segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['sfp2'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['sfp2'][1])] = ExperimentSegment.SFP2.value
         segment_ids[(self.ecg_timestamp_full >= self.segment_timestamps['sfp3'][0]) & (self.ecg_timestamp_full <= self.segment_timestamps['sfp3'][1])] = ExperimentSegment.SFP3.value
         self.ecg_segment_ids = segment_ids # (N,)
+        self._check_segment_occurrence(self.ecg_segment_ids)
 
         nk_r_peaks, info = neurokit2.ecg_peaks(self.ecg_signal_clean, sampling_rate=self.sampling_frequency)
         self.time_domain_metrics = neurokit2.hrv_time(nk_r_peaks, sampling_rate=self.sampling_frequency)
@@ -124,17 +125,32 @@ class SegmentedPolarECG(PolarECG):
     def _parse_segment_timestamp(self, timestamp: str) -> datetime:
         return datetime.strptime(self.session_timestamps[0].strftime('%Y-%m-%d') + ' ' + timestamp, '%Y-%m-%d %H:%M:%S')
 
-    def _check_segment_occurrence(self, segment_ids) -> None:
+    def _check_segment_occurrence(self, segment_ids, raise_exception: bool = False) -> None:
         segment_names = {segment.value: segment.name for segment in ExperimentSegment}
 
+        num_errors = 0
         for segment_id in segment_names.keys():
             if sum(segment_ids == segment_id) == 0:
-                raise ValueError(f"Error in session {self.session_id}. {segment_names[segment_id]} segment not found." + 
-                                 "Probably there is no overlap between the session and segment timestamps.")
+                if raise_exception:
+                    raise ValueError(f"Error in session {self.session_id}. {segment_names[segment_id]} segment not found." + 
+                                    "Probably there is no overlap between the session and segment timestamps.")
+                else:
+                    print(f"Warning: {segment_names[segment_id]} segment not found in session {self.session_id}.")
+                num_errors += 1
+
+        if num_errors == len(segment_names.keys())-1:
+            raise ValueError(f"Error in session {self.session_id}. No segments found. Probably there is no overlap between the session and segment timestamps.")
 
     def save_ecg_plots(self, n_points: int = 2000, output_dir: str = 'visualization') -> None:
-        ecg_mean = np.nanmean(self.ecg_signal_clean[self.ecg_segment_ids != ExperimentSegment.OUTSIDE.value])
-        ecg_std = np.nanstd(self.ecg_signal_clean[self.ecg_segment_ids != ExperimentSegment.OUTSIDE.value])
+        if (Path(output_dir) / f'{str(self.session_id)}_{self.participant_id}').is_dir(): return
+
+        signal = self.ecg_signal_clean[self.ecg_segment_ids != ExperimentSegment.OUTSIDE.value]
+        if len(signal) == 0:
+            print(f"Skipping ECG plots for {str(self.session_id) + ' ' + self.participant_id}. No segments found.")
+            return
+
+        ecg_mean = np.nanmean(signal)
+        ecg_std = np.nanstd(signal)
 
         for ind in tqdm(range(0, len(self.ecg_signal_clean), n_points), total=len(self.ecg_signal_clean) // n_points + 1, desc=f'Saving ECG plots for {str(self.session_id) + " " + self.participant_id}'):
             part_ecg_signal_clean = self.ecg_signal_clean[ind:ind + n_points]
@@ -171,7 +187,7 @@ class SegmentedPolarECG(PolarECG):
         plt.savefig(output_path)
         plt.close()
 
-    def save_structs(self, output_dir: str = 'data') -> 'SegmentedPolarECG':
+    def save_structs(self, output_dir: str = 'data/processed') -> 'SegmentedPolarECG':
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         for segment in ExperimentSegment:
@@ -182,7 +198,7 @@ class SegmentedPolarECG(PolarECG):
             code = f'{self.session_id}_{segment.name}_{self.participant_id}'
             rr_peaks = self.r_peaks['timestamp_delta'][self.r_peaks['segment_ids'] == segment.value]
             rr_interval = np.diff(rr_peaks)
-            rmssd = calculate_rmssd(rr_interval)
+            # rmssd = calculate_rmssd(rr_interval)
 
             struct = {
                 'code': code,
@@ -198,7 +214,7 @@ class SegmentedPolarECG(PolarECG):
             })
             r_peaks_df.to_csv(str(Path(output_dir) / f'{code}_r-peaks.csv'), index=False)
 
-            self.time_domain_metrics.to_csv(str(Path(output_dir) / f'{code}_features.csv'), index=False)
+            self.time_domain_metrics.to_csv(str(Path(output_dir) / f'{code}_nk2_features.csv'), index=False)
             scipy.io.savemat(str(Path(output_dir) / f'{code}.mat'), struct)
             print('Struct is saved:', str(Path(output_dir) / f'{code}.mat'))
 
@@ -266,27 +282,37 @@ if __name__ == '__main__':
         print("Running on multiple samples...")
         df = read_excel(args.xlsx)
         
-        with open('skipped_segments.txt', 'w') as f:
+        skipped_path = Path('data/summary/skipped_segments.txt')
+        skipped_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(skipped_path), 'w') as f:
 
             for index, row in df.iterrows():
                 print("=" * 50)
-                hrv_anya = SegmentedPolarECG(row['participant_code'], "A", row['polar_csv_anya'],
-                                            row['baseline_start'], row['baseline_end'],
-                                            row['sfp_1_start'], row['sfp_1_end'],
-                                            row['sfp_2_start'], row['sfp_2_end'],
-                                            row['sfp_3_start'], row['sfp_3_end']).save_structs()
 
-                if bool(args.save_ecg_plots):
-                    hrv_anya.save_ecg_plots()
+                try:
+                    hrv_anya = SegmentedPolarECG(row['participant_code'], "A", row['polar_csv_anya'],
+                                                row['baseline_start'], row['baseline_end'],
+                                                row['sfp_1_start'], row['sfp_1_end'],
+                                                row['sfp_2_start'], row['sfp_2_end'],
+                                                row['sfp_3_start'], row['sfp_3_end']).save_structs()
+                    if bool(args.save_ecg_plots):
+                        hrv_anya.save_ecg_plots()
 
-                hrv_baba = SegmentedPolarECG(row['participant_code'], "B", row['polar_csv_baba'],
-                                            row['baseline_start'], row['baseline_end'],
-                                            row['sfp_1_start'], row['sfp_1_end'],
-                                            row['sfp_2_start'], row['sfp_2_end'],
-                                            row['sfp_3_start'], row['sfp_3_end']).save_structs()
+                except ValueError:
+                    print(f"[Error] Session {row['participant_code']}. Participant: A. Skipped...\n")
 
-                if bool(args.save_ecg_plots):
-                    hrv_baba.save_ecg_plots()
+                try:
+                    hrv_baba = SegmentedPolarECG(row['participant_code'], "B", row['polar_csv_baba'],
+                                                row['baseline_start'], row['baseline_end'],
+                                                row['sfp_1_start'], row['sfp_1_end'],
+                                                row['sfp_2_start'], row['sfp_2_end'],
+                                                row['sfp_3_start'], row['sfp_3_end']).save_structs()
+
+                    if bool(args.save_ecg_plots):
+                        hrv_baba.save_ecg_plots()
+
+                except ValueError:
+                    print(f"[Error] Session {row['participant_code']}. Participant: A. Skipped...\n")
 
                 for line in hrv_anya.msg.split('\n'):
                     if line != "":
